@@ -56,6 +56,10 @@ type TaskService struct {
 	// succeeds; the concrete type is *composio.Service.
 	Composio ComposioOverlayBuilder
 
+	// Provisioner, when set, is called to wake on-demand compute for a runtime
+	// that is not currently online at enqueue time. Nil (self-hosted) is a no-op.
+	Provisioner OnDemandProvisioner
+
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
 	analyticsContextOrder []string
