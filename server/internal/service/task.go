@@ -3973,6 +3973,11 @@ func (s *TaskService) wakeProvisionedRuntime(runtimeID pgtype.UUID) {
 		return
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("wakeProvisionedRuntime: recovered panic", "runtime_id", util.UUIDToString(runtimeID), "panic", r)
+			}
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 		defer cancel()
 		rt, err := s.Queries.GetAgentRuntime(ctx, runtimeID)

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
@@ -10,13 +11,23 @@ import (
 
 type fakeProvisioner struct {
 	enabled bool
+	mu      sync.Mutex
 	calls   []cloudruntime.EnsureRequest
 }
 
 func (f *fakeProvisioner) Enabled() bool { return f.enabled }
 func (f *fakeProvisioner) Ensure(ctx context.Context, req cloudruntime.EnsureRequest) (*cloudruntime.EnsureResult, error) {
+	f.mu.Lock()
 	f.calls = append(f.calls, req)
+	f.mu.Unlock()
 	return &cloudruntime.EnsureResult{Status: "provisioning"}, nil
+}
+
+// callSnapshot returns a race-safe copy of the recorded Ensure calls.
+func (f *fakeProvisioner) callSnapshot() []cloudruntime.EnsureRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]cloudruntime.EnsureRequest(nil), f.calls...)
 }
 
 func TestShouldEnsureRuntime(t *testing.T) {
@@ -45,11 +56,12 @@ func TestMaybeEnsureRuntime_CallsEnsureForCloudOffline(t *testing.T) {
 
 	svc.maybeEnsureRuntime(context.Background(), rt)
 
-	if len(prov.calls) != 1 {
-		t.Fatalf("Ensure calls = %d, want 1", len(prov.calls))
+	calls := prov.callSnapshot()
+	if len(calls) != 1 {
+		t.Fatalf("Ensure calls = %d, want 1", len(calls))
 	}
-	if prov.calls[0].Provider != "claude" {
-		t.Fatalf("provider = %q", prov.calls[0].Provider)
+	if calls[0].Provider != "claude" {
+		t.Fatalf("provider = %q", calls[0].Provider)
 	}
 }
 
@@ -60,15 +72,15 @@ func TestMaybeEnsureRuntime_SkipsWhenOnlineOrNilOrDisabled(t *testing.T) {
 	// online cloud runtime -> no call
 	p1 := &fakeProvisioner{enabled: true}
 	(&TaskService{Provisioner: p1}).maybeEnsureRuntime(context.Background(), rtOnline)
-	if len(p1.calls) != 0 {
-		t.Fatalf("online: Ensure calls = %d, want 0", len(p1.calls))
+	if len(p1.callSnapshot()) != 0 {
+		t.Fatalf("online: Ensure calls = %d, want 0", len(p1.callSnapshot()))
 	}
 
 	// disabled provisioner -> no call
 	p2 := &fakeProvisioner{enabled: false}
 	(&TaskService{Provisioner: p2}).maybeEnsureRuntime(context.Background(), rtOffline)
-	if len(p2.calls) != 0 {
-		t.Fatalf("disabled: Ensure calls = %d, want 0", len(p2.calls))
+	if len(p2.callSnapshot()) != 0 {
+		t.Fatalf("disabled: Ensure calls = %d, want 0", len(p2.callSnapshot()))
 	}
 
 	// nil provisioner -> no panic, no call

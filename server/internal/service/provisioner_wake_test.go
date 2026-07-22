@@ -63,15 +63,16 @@ func TestWakeProvisionedRuntime_TriggersEnsure(t *testing.T) {
 	// wake is dispatched asynchronously; poll briefly.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(prov.calls) > 0 {
+		if len(prov.callSnapshot()) > 0 {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if len(prov.calls) != 1 {
-		t.Fatalf("Ensure calls = %d, want 1", len(prov.calls))
+	calls := prov.callSnapshot()
+	if len(calls) != 1 {
+		t.Fatalf("Ensure calls = %d, want 1", len(calls))
 	}
-	if prov.calls[0].RuntimeID != util.UUIDToString(rt.ID) {
-		t.Fatalf("ensure runtime_id = %q", prov.calls[0].RuntimeID)
+	if calls[0].RuntimeID != util.UUIDToString(rt.ID) {
+		t.Fatalf("ensure runtime_id = %q", calls[0].RuntimeID)
 	}
 }
