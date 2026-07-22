@@ -3968,6 +3968,8 @@ func (s *TaskService) notifyRuntimeMayHaveWork(runtimeID pgtype.UUID, taskID str
 // wakeProvisionedRuntime loads the runtime and, if it is a cloud runtime that is not
 // online, asks the provisioner to wake it. Runs in the background so enqueue never
 // blocks on an outbound HTTP call. No-op when no provisioner is configured.
+// It runs on every "may have work" signal (fresh enqueue and terminal task
+// transitions), so a runtime whose successor task just became claimable is also woken.
 func (s *TaskService) wakeProvisionedRuntime(runtimeID pgtype.UUID) {
 	if s.Provisioner == nil || !s.Provisioner.Enabled() || !runtimeID.Valid {
 		return

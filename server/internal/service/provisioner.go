@@ -35,6 +35,6 @@ func (s *TaskService) maybeEnsureRuntime(ctx context.Context, rt db.AgentRuntime
 		RuntimeID: util.UUIDToString(rt.ID),
 		Provider:  rt.Provider,
 	}); err != nil {
-		slog.Warn("provisioner ensure failed", "runtime_id", util.UUIDToString(rt.ID), "error", err)
+		slog.Warn("provisioner ensure failed", "runtime_id", util.UUIDToString(rt.ID), "provider", rt.Provider, "error", err)
 	}
 }
