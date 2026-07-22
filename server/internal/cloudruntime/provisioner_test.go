@@ -74,3 +74,16 @@ func TestClientEnsureDisabledClient(t *testing.T) {
 		t.Fatal("expected error from disabled client")
 	}
 }
+
+func TestClientEnsureMalformedBodyReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{not json`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{BaseURL: srv.URL})
+	if _, err := c.Ensure(context.Background(), EnsureRequest{RuntimeID: "rt-1"}); err == nil {
+		t.Fatal("expected error for malformed response body")
+	}
+}

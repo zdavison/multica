@@ -51,7 +51,9 @@ func (c *Client) Ensure(ctx context.Context, req EnsureRequest) (*EnsureResult, 
 	}
 	var out EnsureResult
 	if len(resp.Body) > 0 {
-		_ = json.Unmarshal(resp.Body, &out)
+		if err := json.Unmarshal(resp.Body, &out); err != nil {
+			return nil, fmt.Errorf("provisioner ensure: decode response: %w", err)
+		}
 	}
 	return &out, nil
 }
