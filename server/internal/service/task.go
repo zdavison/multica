@@ -3958,10 +3958,30 @@ func (s *TaskService) notifyRuntimeMayHaveWork(runtimeID pgtype.UUID, taskID str
 	// every Redis call with a short timeout so a wedged Redis cannot
 	// block enqueue.
 	s.EmptyClaim.Bump(context.Background(), runtimeKey)
+	s.wakeProvisionedRuntime(runtimeID)
 	if s.Wakeup == nil {
 		return
 	}
 	s.Wakeup.NotifyTaskAvailable(runtimeKey, taskID)
+}
+
+// wakeProvisionedRuntime loads the runtime and, if it is a cloud runtime that is not
+// online, asks the provisioner to wake it. Runs in the background so enqueue never
+// blocks on an outbound HTTP call. No-op when no provisioner is configured.
+func (s *TaskService) wakeProvisionedRuntime(runtimeID pgtype.UUID) {
+	if s.Provisioner == nil || !s.Provisioner.Enabled() || !runtimeID.Valid {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		defer cancel()
+		rt, err := s.Queries.GetAgentRuntime(ctx, runtimeID)
+		if err != nil {
+			slog.Warn("provisioner wake: runtime lookup failed", "runtime_id", util.UUIDToString(runtimeID), "error", err)
+			return
+		}
+		s.maybeEnsureRuntime(ctx, rt)
+	}()
 }
 
 func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTaskQueue) {
