@@ -60,6 +60,10 @@ type TaskService struct {
 	// runtime that is not currently online at enqueue time. Nil (self-hosted) is a no-op.
 	Provisioner OnDemandProvisioner
 
+	// ensureCoalesce dedups provisioner Ensure calls per runtime within a short
+	// window. Nil is valid (no coalescing — every eligible signal fires Ensure).
+	ensureCoalesce *ensureCoalescer
+
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
 	analyticsContextOrder []string
@@ -244,7 +248,7 @@ func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.
 	if len(wakeups) > 0 {
 		wakeup = wakeups[0]
 	}
-	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup}
+	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup, ensureCoalesce: newEnsureCoalescer(defaultEnsureCoalesceTTL)}
 }
 
 var trivialDoneMarkers = []string{
@@ -3973,6 +3977,10 @@ func (s *TaskService) notifyRuntimeMayHaveWork(runtimeID pgtype.UUID, taskID str
 // claimable is also provisioned.
 func (s *TaskService) ensureProvisionedRuntimeAvailable(runtimeID pgtype.UUID) {
 	if s.Provisioner == nil || !s.Provisioner.Enabled() || !runtimeID.Valid {
+		return
+	}
+	// Collapse bursts: skip if this runtime was ensured within the TTL window.
+	if s.ensureCoalesce != nil && !s.ensureCoalesce.shouldFire(util.UUIDToString(runtimeID), time.Now()) {
 		return
 	}
 	go func() {

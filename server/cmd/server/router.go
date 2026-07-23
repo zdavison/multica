@@ -241,9 +241,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	// Reuse the outbound cloud-runtime client as the on-demand provisioner seam.
 	// It satisfies service.OnDemandProvisioner; Enabled() is false when no fleet
-	// URL is configured (self-hosted), making the wake a no-op.
+	// URL is configured (self-hosted), making provisioning a no-op.
 	if client, ok := h.CloudRuntime.(*cloudruntime.Client); ok {
 		h.TaskService.Provisioner = client
+	} else {
+		slog.Warn("cloud-runtime client is not *cloudruntime.Client; on-demand provisioning disabled")
 	}
 	if rdb != nil {
 		h.UpdateStore = handler.NewRedisUpdateStore(rdb)

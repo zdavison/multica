@@ -60,7 +60,7 @@ func (c *Client) Ensure(ctx context.Context, req EnsureRequest) (*EnsureResult, 
 
 // Suspend proactively suspends a runtime (state preserved, resumable).
 func (c *Client) Suspend(ctx context.Context, runtimeID string) error {
-	return c.postRuntimeID(ctx, "/api/v1/runtimes/suspend", "status", runtimeID)
+	return c.postRuntimeID(ctx, "/api/v1/runtimes/suspend", "suspend", runtimeID)
 }
 
 // Destroy terminally tears a runtime's compute down.
