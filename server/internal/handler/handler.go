@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -220,6 +221,10 @@ type Handler struct {
 	// delivering events, to flush debounced run triggers and join in-flight
 	// reply goroutines. Built unconditionally (even without Lark).
 	ChannelRouter *engine.Router
+	// webhookChannelHandler routes inbound Telegram webhook updates into the
+	// channel engine. Set to ChannelRouter in production wiring (router.go);
+	// tests inject a fake. Keep ChannelRouter as-is for Drain()/main.go.
+	webhookChannelHandler channelHandler
 	// ChannelMediaReconciler settles the channel-media intent ledger
 	// (uploaded-but-unbound object reclaim). Built in cmd/server/router.go
 	// where the storage backend exists; main.go starts it as an independent
@@ -229,6 +234,10 @@ type Handler struct {
 	// pasted tokens / list / revoke) and the at-rest encryption of each app's bot
 	// + app tokens (MUL-3666). Nil unless MULTICA_SLACK_SECRET_KEY is set.
 	SlackInstall *slack.InstallService
+	// TelegramInstall owns the bring-your-own-bot Telegram install lifecycle
+	// (register bot tokens / list / revoke) and the at-rest encryption of each
+	// bot's token. Nil unless MULTICA_TELEGRAM_SECRET_KEY is set.
+	TelegramInstall *telegram.InstallService
 	// SlackBindingTokens mints/redeems the user-binding tokens behind the
 	// "link your Slack account" prompt (MUL-3666). Nil unless Slack is
 	// configured (MULTICA_SLACK_SECRET_KEY set).
