@@ -93,8 +93,9 @@ No DB migration. No schema change (provenance already lives in `config`).
   the existing `readOrigin(skill)`.
 - **Kebab menu** (`packages/views/skills/components/skill-list-actions.tsx`,
   `SkillRowActions`): add an "Update" `DropdownMenuItem`, shown only when
-  `isUpdatableOrigin(readOrigin(row.skill)) && row.canEdit`, placed above the Delete
-  separator/item.
+  `canReimportSkill(row.skill, ctx.currentUserId)` (creator-only + URL origin —
+  narrower than `row.canEdit`, matching the server's creator-only overwrite
+  rule), placed above the Delete separator/item.
 - **Confirm dialog**: an `AlertDialog` with destructive framing — "Update from source?
   This replaces the skill's content and files with the latest from `<source_url>`; local
   changes will be lost." On confirm: call `api.reimportSkill(id)` with a visible pending
