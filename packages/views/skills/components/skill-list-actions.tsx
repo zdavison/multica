@@ -7,6 +7,7 @@ import {
   Loader2,
   MoreHorizontal,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
   X,
@@ -48,6 +49,7 @@ import {
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
+import { isUpdatableOrigin, readOrigin } from "../lib/origin";
 import type { SkillRow } from "./skills-page";
 
 // Shared context the row kebab and the batch toolbar both need. Assembled
@@ -505,6 +507,111 @@ export function DeleteSkillsDialog({
 }
 
 // ---------------------------------------------------------------------------
+// Update-from-source confirmation (single row or batch; creator + URL origin)
+// ---------------------------------------------------------------------------
+
+export function UpdateSkillDialog({
+  rows,
+  ctx,
+  open,
+  onOpenChange,
+  onUpdated,
+}: {
+  rows: SkillRow[];
+  ctx: SkillActionsContext;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onUpdated?: () => void;
+}) {
+  const { t } = useT("skills");
+  const qc = useQueryClient();
+  const [updating, setUpdating] = useState(false);
+  const single = rows.length === 1 ? rows[0] : null;
+  const count = rows.length;
+  const sourceUrl = single ? readOrigin(single.skill).source_url ?? "" : "";
+
+  const handleConfirm = async () => {
+    setUpdating(true);
+    try {
+      for (const row of rows) {
+        await api.reimportSkill(row.skill.id);
+      }
+      // Prefix key invalidates both the skills list and the skill detail; the
+      // agent list carries each skill's name/description inline, so refresh it too.
+      qc.invalidateQueries({ queryKey: workspaceKeys.skills(ctx.wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(ctx.wsId) });
+      toast.success(
+        single
+          ? t(($) => $.actions.updated_toast, { name: single.skill.name })
+          : t(($) => $.actions.updated_multi_toast, { count }),
+      );
+      onOpenChange(false);
+      onUpdated?.();
+    } catch (e) {
+      toast.error(
+        e instanceof Error && e.message
+          ? e.message
+          : t(($) => $.actions.update_failed_toast),
+      );
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!updating) onOpenChange(v);
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {single
+              ? t(($) => $.actions.update_dialog_title)
+              : t(($) => $.actions.update_dialog_title_multi, { count })}
+          </DialogTitle>
+          <DialogDescription>
+            {single
+              ? t(($) => $.actions.update_dialog_desc, { name: single.skill.name })
+              : t(($) => $.actions.update_dialog_desc_multi, { count })}
+          </DialogDescription>
+        </DialogHeader>
+        {single && sourceUrl && (
+          <div className="truncate rounded-md bg-muted px-3 py-2 text-caption text-muted-foreground">
+            {t(($) => $.actions.update_dialog_source, { url: sourceUrl })}
+          </div>
+        )}
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={updating}
+          >
+            {t(($) => $.actions.cancel)}
+          </Button>
+          <Button type="button" onClick={handleConfirm} disabled={updating}>
+            {updating ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {t(($) => $.actions.updating)}
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-3 w-3" />
+                {t(($) => $.actions.update_confirm)}
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Row kebab
 // ---------------------------------------------------------------------------
 
@@ -521,7 +628,11 @@ export function SkillRowActions({
 }) {
   const { t } = useT("skills");
   const [addOpen, setAddOpen] = useState(false);
+  const [updateOpen, setUpdateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // Anyone who can edit the skill (workspace owner/admin, or its creator) may
+  // update it from source — mirrors the server's canManageSkill authorization.
+  const canReimport = row.canEdit && isUpdatableOrigin(readOrigin(row.skill));
 
   return (
     <span
@@ -545,6 +656,12 @@ export function SkillRowActions({
             <Plus className="size-3.5" />
             {t(($) => $.actions.add_to_agent)}
           </DropdownMenuItem>
+          {canReimport && (
+            <DropdownMenuItem onClick={() => setUpdateOpen(true)}>
+              <RefreshCw className="size-3.5" />
+              {t(($) => $.actions.update)}
+            </DropdownMenuItem>
+          )}
           {row.canEdit && (
             <>
               <DropdownMenuSeparator />
@@ -565,6 +682,14 @@ export function SkillRowActions({
         open={addOpen}
         onOpenChange={setAddOpen}
       />
+      {canReimport && (
+        <UpdateSkillDialog
+          rows={[row]}
+          ctx={ctx}
+          open={updateOpen}
+          onOpenChange={setUpdateOpen}
+        />
+      )}
       <DeleteSkillsDialog
         rows={[row]}
         ctx={ctx}
@@ -590,11 +715,30 @@ export function SkillBatchToolbar({
 }) {
   const { t } = useT("skills");
   const [addOpen, setAddOpen] = useState(false);
+  const [updateOpen, setUpdateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   if (rows.length === 0) return null;
 
   const allDeletable = rows.every((r) => r.canEdit);
+  // Update applies only when every selected skill is editable AND URL-sourced;
+  // mixed selections (e.g. a manual skill) disable it, matching Delete's gate.
+  const allUpdatable = rows.every(
+    (r) => r.canEdit && isUpdatableOrigin(readOrigin(r.skill)),
+  );
+
+  const updateButton = (
+    <Button
+      variant="ghost"
+      size="sm"
+      disabled={!allUpdatable}
+      onClick={() => setUpdateOpen(true)}
+      className={cn(!allUpdatable && "pointer-events-none")}
+    >
+      <RefreshCw className="mr-1 size-3.5" />
+      {t(($) => $.actions.update)}
+    </Button>
+  );
 
   const deleteButton = (
     <Button
@@ -638,6 +782,19 @@ export function SkillBatchToolbar({
           {t(($) => $.actions.add_to_agent)}
         </Button>
 
+        {allUpdatable ? (
+          updateButton
+        ) : (
+          <Tooltip>
+            <TooltipTrigger
+              render={<span className="inline-flex">{updateButton}</span>}
+            />
+            <TooltipContent side="top">
+              {t(($) => $.actions.update_no_permission)}
+            </TooltipContent>
+          </Tooltip>
+        )}
+
         {allDeletable ? (
           deleteButton
         ) : (
@@ -657,6 +814,13 @@ export function SkillBatchToolbar({
         ctx={ctx}
         open={addOpen}
         onOpenChange={setAddOpen}
+      />
+      <UpdateSkillDialog
+        rows={rows}
+        ctx={ctx}
+        open={updateOpen}
+        onOpenChange={setUpdateOpen}
+        onUpdated={onClear}
       />
       <DeleteSkillsDialog
         rows={rows}
