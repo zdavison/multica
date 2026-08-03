@@ -64,11 +64,19 @@ Handler flow:
    extracted into a small shared helper `fetchImportedSkill(ctx, client, source, url)` so
    `ImportSkill` and `ReimportSkill` share exactly one fetch path.
 6. `overwriteSkillWithFiles(skillOverwriteInput{ WorkspaceID, TargetSkillID: skill.ID,
-   UserID, ExpectedName: skill.Name, Description, Content, Config: {origin}, Files })`.
+   UserID, ExpectedName: skill.Name, Description, Content, Config: {origin}, Files,
+   Authz: overwriteAuthzCreatorOrManager, ExpectedUpdatedAt: skill.UpdatedAt })`.
    This replaces description / content / config(origin) / file set in place while
    preserving the skill's id and current name. Passing `ExpectedName = skill.Name`
    satisfies the existing name-match guard trivially (same skill), so an upstream rename
    does not block the update and the local name is preserved.
+
+   The fetch in step 5 runs for up to `importFetchTimeout`. At write time, neither the
+   permission verdict nor the skill snapshot from steps 1–4 still holds. The transaction
+   therefore locks the target row `FOR UPDATE` and re-derives both. `Authz` re-reads
+   workspace membership and re-applies "current owner/admin, or current creator".
+   `ExpectedUpdatedAt` is a compare-and-set against the row read in step 2. A caller
+   demoted or removed mid-fetch gets 403. A concurrent edit gets 409 and survives.
 7. On success: publish `EventSkillUpdated` and return the updated
    `SkillWithFilesResponse` (mirrors the `on_conflict: overwrite` result).
 
@@ -78,6 +86,8 @@ Error handling reuses existing mappings:
   / 504 timeout).
 - Skill deleted between load and write → the overwrite path's `errSkillOverwriteNotFound`
   → 404-class failure.
+- Membership or role lost during the fetch → `errSkillOverwriteForbidden` → 403.
+- Skill edited during the fetch → `errSkillOverwriteStale` → 409.
 - Non-creator → 403. Non-URL / missing origin → 4xx from step 3.
 
 No DB migration. No schema change (provenance already lives in `config`).
