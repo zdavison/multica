@@ -15,6 +15,7 @@ a pointer.
 | `ParseMentions` extracts and dedups `{Type, ID}` from `m[2]`/`m[3]` | `server/internal/util/mention.go:24-37` |
 | `Mention.Type` doc enum = "member", "agent", "issue", or "all" (squad added in regex) | `server/internal/util/mention.go:7` |
 | `HasMentionAll` reports whether any parsed mention is `all` | `server/internal/util/mention.go:40-47` |
+| **`project` is NOT in the type group** — `[Label](mention://project/<uuid>)` never parses, so it can enqueue nothing. It is a render-only link every client makes navigable — a chip on web/desktop (`RichLink` in `packages/views/rich-content/rich-content.tsx`), an ordinary enriched link whose tap is routed on mobile (`onLinkPress` in `apps/mobile/lib/markdown/markdown.tsx`, which renders no chip) | `server/internal/util/mention.go:16` |
 
 ### Parser behavior tests (pin the example shapes the skill uses)
 
@@ -60,6 +61,16 @@ a pointer.
 | Edit UI calls preview with `editingCommentId`, renders trigger chips, tracks suppressed agents, and submits suppressions on save | `packages/views/issues/components/comment-card.tsx:269-274,300-315,359-367,578-582,858-862` |
 | Preview hook includes `editingCommentId` in its query key and sends it to the API | `packages/views/issues/hooks/use-comment-trigger-preview.ts:58-80` |
 | Timeline edit mutation passes suppressed agent IDs through to the API layer | `packages/views/issues/hooks/use-issue-timeline.ts:299-302` |
+
+## Plain replies and implicit routing
+
+| Fact | Source |
+| --- | --- |
+| A direct reply to an agent resolves through `routeReplyToParentAuthor` before any assignee fallback | `server/internal/handler/comment.go` (search `parentComment.AuthorType == "agent"` inside `computeCommentAgentTriggers`) |
+| A member-authored thread with an explicit or task-derived agent owner resolves through `routeThreadRootOwners` and returns before the final fallback | `server/internal/handler/comment.go` (search `routeThreadRootOwners` inside `computeCommentAgentTriggers`) |
+| If the direct parent is a member and no thread owner handled the reply, the reply returns no trigger instead of invoking `routeAssigneeFallback` | `server/internal/handler/comment.go` (search `A plain member-to-member reply`) |
+| Top-level member comments retain the final agent/squad assignee fallback because they have no parent | `server/internal/handler/comment.go` (the final `routeAssigneeFallback` call in `computeCommentAgentTriggers`) |
+| Regression coverage checks Agent and Squad assignees through both trigger preview and actual comment creation/enqueue | `server/internal/handler/comment_trigger_preview_test.go` (search `PlainReplyToUnownedMemberRootSkipsAssigneeFallback`) |
 
 ## Edit-preview pending-task dedup
 

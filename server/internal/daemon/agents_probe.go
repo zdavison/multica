@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // shellResolveTTL bounds how long one login-shell PATH resolution is reused
@@ -168,6 +170,18 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_PI_PATH", "pi", "MULTICA_PI_MODEL"); ok {
 		agents["pi"] = e
 	}
+	// Built-in runtime identities (e.g. omp) are derived from the descriptor
+	// registry in server/pkg/agent/builtin_runtimes.go. Each one probes a
+	// separate CLI independently so a host with both pi and omp installed gets
+	// two runtimes. The env prefix and default command come from the
+	// descriptor, so adding a new fork is a descriptor entry, not a probe edit.
+	for _, desc := range agent.BuiltinRuntimes {
+		pathEnv := desc.EnvPrefix + "_PATH"
+		modelEnv := desc.EnvPrefix + "_MODEL"
+		if e, ok := probe(pathEnv, desc.DefaultCommand, modelEnv); ok {
+			agents[desc.ID] = e
+		}
+	}
 	if e, ok := probe("MULTICA_CURSOR_PATH", "cursor-agent", "MULTICA_CURSOR_MODEL"); ok {
 		agents["cursor"] = e
 	}
@@ -176,6 +190,9 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	}
 	if e, ok := probe("MULTICA_KIMI_PATH", "kimi", "MULTICA_KIMI_MODEL"); ok {
 		agents["kimi"] = e
+	}
+	if e, ok := probe("MULTICA_REASONIX_PATH", "reasonix", "MULTICA_REASONIX_MODEL"); ok {
+		agents["reasonix"] = e
 	}
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
@@ -199,6 +216,13 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_QODER_PATH", "qodercli", "MULTICA_QODER_MODEL"); ok {
 		agents["qoder"] = e
 	}
+	// Qoder CN CLI exposes the same ACP transport as Qoder CLI under a
+	// separate `qoderclicn` binary and account/config root. Register it as an
+	// independent provider so hosts with either or both editions get the
+	// matching runtime without a custom profile.
+	if e, ok := probe("MULTICA_QODERCLICN_PATH", "qoderclicn", "MULTICA_QODERCLICN_MODEL"); ok {
+		agents["qoderclicn"] = e
+	}
 	// ByteDance official TRAE CLI (the `traecli` binary from https://docs.trae.cn/cli),
 	// driven over ACP via `traecli acp serve --yolo`. MULTICA_TRAECLI_MODEL seeds
 	// the daemon-wide default model (a model id from the user's logged-in traecli
@@ -216,6 +240,14 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// QWEN.md and .qwen/skills task context is prepared by execenv.
 	if e, ok := probe("MULTICA_QWEN_PATH", "qwen", "MULTICA_QWEN_MODEL"); ok {
 		agents["qwen"] = e
+	}
+	// QwenPaw (`qwenpaw`) is the QwenPaw CLI agent, driven over ACP via
+	// `qwenpaw acp`. It takes no model env var: the backend never calls
+	// session/set_model (it would rewrite QwenPaw's shared agent config), so
+	// ExecOptions.Model is ignored — see ModelSelectionSupported. Reading one
+	// here would only advertise a knob that silently does nothing.
+	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", ""); ok {
+		agents["qwenpaw"] = e
 	}
 	return agents
 }

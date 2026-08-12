@@ -124,12 +124,6 @@ type TaskCompletedPayload struct {
 	TaskID string `json:"task_id"`
 	PRURL  string `json:"pr_url,omitempty"`
 	Output string `json:"output,omitempty"`
-	// QuickActionsPending declares that this daemon will follow up with a
-	// quick-actions supplement for this chat turn (the suggestion pass runs
-	// in the background after this callback). Per-turn capability signal:
-	// absent on non-chat tasks, skipped turns, and older daemons — so a
-	// false/missing flag means clients must not wait for suggestions.
-	QuickActionsPending bool `json:"quick_actions_pending,omitempty"`
 }
 
 // ChatQuickActionsPayload supplements one completed chat turn with the
@@ -196,6 +190,16 @@ const (
 	// without any text reply — a visible, deliberate terminal outcome rather
 	// than a silently-dropped turn (MUL-4351).
 	ChatMessageKindNoResponse = "no_response"
+	// ChatMessageKindOnboardingKickoff is the server-authored, hidden first
+	// turn used to start Mika's onboarding conversation. It is persisted so
+	// the runtime receives a normal immutable chat input batch. User-facing
+	// APIs filter it out; clients also ignore the kind defensively.
+	ChatMessageKindOnboardingKickoff = "onboarding_kickoff"
+	// ChatMessageKindOnboardingOpening marks the assistant reply produced by
+	// the onboarding kickoff. The kickoff row itself never reaches clients, so
+	// the opening self-describes: chat renders the starter cards under this
+	// kind instead of quick-action chips (MUL-5765).
+	ChatMessageKindOnboardingOpening = "onboarding_opening"
 )
 
 // ChatDonePayload is broadcast when an agent finishes responding to a chat
