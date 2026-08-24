@@ -171,6 +171,7 @@ var (
 
 	knownCloudRuntimeOps = map[string]string{
 		"provision": "provision",
+		"suspend":   "suspend",
 		"terminate": "terminate",
 		"status":    "status",
 		"gateway":   "gateway",

@@ -71,6 +71,14 @@ type TaskService struct {
 	quickActionsInFlight sync.Map
 	quickActionsRunning  atomic.Int64
 
+	// Provisioner, when set, is called to make on-demand compute available for a
+	// runtime that is not currently online at enqueue time. Nil (self-hosted) is a no-op.
+	Provisioner OnDemandProvisioner
+
+	// ensureCoalesce dedups provisioner Ensure calls per runtime within a short
+	// window. Nil is valid (no coalescing — every eligible signal fires Ensure).
+	ensureCoalesce *ensureCoalescer
+
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
 	analyticsContextOrder []string
@@ -255,7 +263,7 @@ func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.
 	if len(wakeups) > 0 {
 		wakeup = wakeups[0]
 	}
-	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup}
+	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup, ensureCoalesce: newEnsureCoalescer(defaultEnsureCoalesceTTL)}
 }
 
 var trivialDoneMarkers = []string{
@@ -5025,10 +5033,42 @@ func (s *TaskService) notifyRuntimeMayHaveWork(runtimeID pgtype.UUID, taskID str
 	// every Redis call with a short timeout so a wedged Redis cannot
 	// block enqueue.
 	s.EmptyClaim.Bump(context.Background(), runtimeKey)
+	s.ensureProvisionedRuntimeAvailable(runtimeID)
 	if s.Wakeup == nil {
 		return
 	}
 	s.Wakeup.NotifyTaskAvailable(runtimeKey, taskID)
+}
+
+// ensureProvisionedRuntimeAvailable loads the runtime and, if it is a cloud runtime
+// that is not online, asks the provisioner to make its compute available. Runs in
+// the background so enqueue never blocks on an outbound HTTP call. No-op when no
+// provisioner is configured. It runs on every "may have work" signal (fresh enqueue
+// and terminal task transitions), so a runtime whose successor task just became
+// claimable is also provisioned.
+func (s *TaskService) ensureProvisionedRuntimeAvailable(runtimeID pgtype.UUID) {
+	if s.Provisioner == nil || !s.Provisioner.Enabled() || !runtimeID.Valid {
+		return
+	}
+	// Collapse bursts: skip if this runtime was ensured within the TTL window.
+	if s.ensureCoalesce != nil && !s.ensureCoalesce.shouldFire(util.UUIDToString(runtimeID), time.Now()) {
+		return
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("ensureProvisionedRuntimeAvailable: recovered panic", "runtime_id", util.UUIDToString(runtimeID), "panic", r)
+			}
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		defer cancel()
+		rt, err := s.Queries.GetAgentRuntime(ctx, runtimeID)
+		if err != nil {
+			slog.Warn("provisioner ensure: runtime lookup failed", "runtime_id", util.UUIDToString(runtimeID), "error", err)
+			return
+		}
+		s.maybeEnsureRuntime(ctx, rt)
+	}()
 }
 
 func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTaskQueue) {
